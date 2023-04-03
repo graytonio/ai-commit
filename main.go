@@ -60,6 +60,7 @@ func main() {
     logrus.Debugf("AI Commit Prompt: %s\n", commitMsg)
 
     fullMsg := fmt.Sprintf("%s%s", msgPrefix, commitMsg)
+    fmt.Printf("Making Commit: %s\n", fullMsg)
     createGitCommit(fullMsg)
 }
 

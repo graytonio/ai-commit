@@ -1,9 +1,15 @@
 # Git AI Commit
 
-A git plugin to automatically generate commit messages using GPT-4.
+A git plugin to automatically generate commit messages using GPT.
 
-## TODO List
+## Installation
 
-- [ ] Get Diff from git client
-- [ ] API Request to OpenAI
-- [ ] Use response to create commit
+```bash
+go install github.com/graytonio/git-ai-commit
+```
+
+## Usage
+
+```bash
+git ai-commit --prefix "My Commmit - "
+```
