@@ -31,6 +31,7 @@ var (
 	ErrNoStagedChanged = errors.New("no staged changes")
 )
 
+var timeout int
 var msgPrefix string
 var msgSuffix string
 var dryRun bool
@@ -45,6 +46,7 @@ func init() {
 
 	flag.StringVar(&msgPrefix, "prefix", "", "prefix for commit message")
     flag.StringVar(&msgSuffix, "suffix", "", "suffix for commit message")
+    flag.IntVar(&timeout, "timeout", 60, "timeout in seconds")
 	flag.BoolVar(&verbose, "verbose", false, "verbose logging")
 	flag.BoolVar(&dryRun, "dry", false, "process diff without making commit")
 	flag.Parse()
@@ -94,7 +96,7 @@ func generateCommitMessage(diff string) (string, error) {
 		return "", err
 	}
 
-    ctx, cancel := context.WithTimeout(context.Background(), time.Second * 60)
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second * time.Duration(timeout))
     defer cancel()
 
     var rollingCommitSummary string
