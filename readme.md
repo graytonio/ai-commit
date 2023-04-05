@@ -19,6 +19,8 @@ Usage of git-ai-commit:
         process diff without making commit
   -prefix string
         prefix for commit message
+  -suffix string
+        suffix for commit message
   -verbose
         verbose logging
 ```
