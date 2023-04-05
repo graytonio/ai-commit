@@ -32,6 +32,7 @@ var (
 )
 
 var msgPrefix string
+var dryRun bool
 var verbose bool
 
 func init() {
@@ -43,6 +44,7 @@ func init() {
 
 	flag.StringVar(&msgPrefix, "prefix", "", "prefix for commit message")
 	flag.BoolVar(&verbose, "verbose", false, "verbose logging")
+	flag.BoolVar(&dryRun, "dry", false, "process diff without making commit")
 	flag.Parse()
 }
 
@@ -51,24 +53,37 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
+    fmt.Println("Fetching Git Diff")
+
 	diff, err := getGitDiffString()
 	if err != nil {
-		logrus.Fatalln(err)
+        logrus.Fatalf("Error fetching git diff: %v", err)
 	}
 
 	logrus.Debugf("Git Diff: %s\n", diff)
-	logrus.Debugln("Fetching AI Commit Message")
+	fmt.Println("Fetching AI Commit Message")
 
 	commitMsg, err := generateCommitMessage(diff)
 	if err != nil {
-		logrus.Fatalln(err)
+        logrus.Fatalf("Error generating commit message: %v", err)
 	}
 
 	logrus.Debugf("AI Commit Prompt: %s\n", commitMsg)
 
 	fullMsg := fmt.Sprintf("%s%s", msgPrefix, commitMsg)
-	fmt.Printf("Making Commit: %s\n", fullMsg)
-	createGitCommit(fullMsg)
+
+    fmt.Printf("Commit Message: %s\n", fullMsg)
+    
+    if dryRun {
+        fmt.Println("Dry run enabled skipping commit")
+        return
+    }
+	
+    fmt.Println("Creating git commit")
+	err = createGitCommit(fullMsg)
+    if err != nil {
+        logrus.Fatalf("Error creating commit: %v", err)
+    }
 }
 
 func generateCommitMessage(diff string) (string, error) {
