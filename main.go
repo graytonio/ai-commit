@@ -32,6 +32,7 @@ var (
 )
 
 var msgPrefix string
+var msgSuffix string
 var dryRun bool
 var verbose bool
 
@@ -43,6 +44,7 @@ func init() {
 	client = openai.NewClient(token)
 
 	flag.StringVar(&msgPrefix, "prefix", "", "prefix for commit message")
+    flag.StringVar(&msgSuffix, "suffix", "", "suffix for commit message")
 	flag.BoolVar(&verbose, "verbose", false, "verbose logging")
 	flag.BoolVar(&dryRun, "dry", false, "process diff without making commit")
 	flag.Parse()
@@ -70,7 +72,7 @@ func main() {
 
 	logrus.Debugf("AI Commit Prompt: %s\n", commitMsg)
 
-	fullMsg := fmt.Sprintf("%s%s", msgPrefix, commitMsg)
+	fullMsg := fmt.Sprintf("%s%s%s", msgPrefix, commitMsg, msgSuffix)
 
     fmt.Printf("Commit Message: %s\n", fullMsg)
     
