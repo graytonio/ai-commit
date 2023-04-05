@@ -7,107 +7,135 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
+	"github.com/cbess/go-textwrap"
 	"github.com/sashabaranov/go-openai"
 	"github.com/sirupsen/logrus"
 )
 
-const GPTPromptTemplate = `Given a git diff between two versions of a codebase, generate a concise, informative, and accurate commit message that summarizes the changes made in the diff. The commit message should follow good commit message guidelines, including starting with a capitalized verb in the imperative tense and providing a brief description of the changes made.
+const GPTSystemPrompt = `Given a git diff between two versions of a codebase and a message summarizing the previously processed changes, generate a concise, informative, and accurate commit message that summarizes the changes made in the diff. The commit message should follow good commit message guidelines, including starting with a capitalized verb in the imperative tense and providing a brief description of the changes made.
 
 For example, if the git diff shows that a function was added to a file, the generated commit message could be "Add new function to improve performance." If the git diff shows that a line was deleted, the generated commit message could be "Remove unused code to simplify implementation." The goal is to generate a commit message that is useful for other developers to understand the changes made without having to look at the diff themselves.
+
+The final commit message should be at most 50 characters.
+`
+
+const GPTUserMessageTemplate = `%s
 
 %s`
 
 var client *openai.Client
 
 var (
-    ErrNoStagedChanged = errors.New("no staged changes")
+	ErrNoStagedChanged = errors.New("no staged changes")
 )
 
 var msgPrefix string
 var verbose bool
 
 func init() {
-    token, set := os.LookupEnv("OPENAI_TOKEN")
-    if !set {
-        logrus.Fatalln("OPENAI_TOKEN ENV not set")
-    }
-    client = openai.NewClient(token)
+	token, set := os.LookupEnv("OPENAI_TOKEN")
+	if !set {
+		logrus.Fatalln("OPENAI_TOKEN ENV not set")
+	}
+	client = openai.NewClient(token)
 
-    flag.StringVar(&msgPrefix, "prefix", "", "prefix for commit message")
-    flag.BoolVar(&verbose, "verbose", false, "verbose logging")
-    flag.Parse()
+	flag.StringVar(&msgPrefix, "prefix", "", "prefix for commit message")
+	flag.BoolVar(&verbose, "verbose", false, "verbose logging")
+	flag.Parse()
 }
 
 func main() {
-    if verbose {
-        logrus.SetLevel(logrus.DebugLevel)
-    }
+	if verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
 
-    diff, err := getGitDiffString()
-    if err != nil {
-       logrus.Fatalln(err) 
-    }
+	diff, err := getGitDiffString()
+	if err != nil {
+		logrus.Fatalln(err)
+	}
 
-    logrus.Debugf("Git Diff: %s\n", diff)
-    logrus.Debugln("Fetching AI Commit Message")
+	logrus.Debugf("Git Diff: %s\n", diff)
+	logrus.Debugln("Fetching AI Commit Message")
 
-    commitMsg, err := generateCommitMessage(diff)
-    if err != nil {
-        logrus.Fatalln(err)
-    }
+	commitMsg, err := generateCommitMessage(diff)
+	if err != nil {
+		logrus.Fatalln(err)
+	}
 
-    logrus.Debugf("AI Commit Prompt: %s\n", commitMsg)
+	logrus.Debugf("AI Commit Prompt: %s\n", commitMsg)
 
-    fullMsg := fmt.Sprintf("%s%s", msgPrefix, commitMsg)
-    fmt.Printf("Making Commit: %s\n", fullMsg)
-    createGitCommit(fullMsg)
-}
-
-
-func createPromptText(diff string) string {
-    return fmt.Sprintf(GPTPromptTemplate, diff)
+	fullMsg := fmt.Sprintf("%s%s", msgPrefix, commitMsg)
+	fmt.Printf("Making Commit: %s\n", fullMsg)
+	createGitCommit(fullMsg)
 }
 
 func generateCommitMessage(diff string) (string, error) {
-    resp, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
-        Model: openai.GPT3Dot5Turbo0301,
-        Messages: []openai.ChatCompletionMessage{
+	chunks, err := textwrap.WordWrap(diff, 3500, -1)
+	if err != nil {
+		return "", err
+	}
+
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second * 60)
+    defer cancel()
+
+    var rollingCommitSummary string
+	for i, chunk := range chunks.TextGroups { 
+	    var messages = []openai.ChatCompletionMessage{
+		    {
+			    Role:    openai.ChatMessageRoleSystem,
+			    Content: GPTSystemPrompt,
+		    },
             {
                 Role: openai.ChatMessageRoleUser,
-                Content: createPromptText(diff),
+                Content: fmt.Sprintf(GPTUserMessageTemplate, rollingCommitSummary, chunk),
             },
-        },
-   })
+	    }
 
-   if err != nil {
-       return "", err
-   }
+	    logrus.WithField("iteration", i).WithField("state", "pre-completion").WithField("rollingCommitSummary", rollingCommitSummary).Debug()
+    	
+        resp, err := client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+	    	Model:    openai.GPT3Dot5Turbo0301,
+		    Messages: messages,
+	    })
 
-   return resp.Choices[0].Message.Content, nil
+        if err != nil {
+            if errors.Is(err, context.DeadlineExceeded) {
+                logrus.Warn("Context deadline exceeded returning current processed commit message")
+                break // If deadline exceeded return the current commit message buffer
+            }
+            return "", err
+        }
+
+        rollingCommitSummary = resp.Choices[0].Message.Content
+	    logrus.WithField("iteration", i).WithField("state", "post-completion").WithField("rollingCommitSummary", rollingCommitSummary).Debug()
+    }
+
+	return rollingCommitSummary, nil
 }
 
 func getGitDiffString() (string, error) {
-    cmd := exec.Command("git", "diff", "--staged")
-    out, err := cmd.Output()
-    if err != nil {
-        return "", err
-    }
+	cmd := exec.Command("git", "diff", "--staged")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
 
-    // No diff
-    if len(out) == 0 {
-        return "", ErrNoStagedChanged
-    }
+	// No diff
+	if len(out) == 0 {
+		return "", ErrNoStagedChanged
+	}
 
-    return string(out), nil
+	return string(out), nil
 }
 
 func createGitCommit(commit string) error {
-    cmd := exec.Command("git", "commit", "-m", commit)
-    _, err := cmd.Output()
-    if err != nil {
-        return err
-    }
+	cmd := exec.Command("git", "commit", "-m", commit)
+	_, err := cmd.Output()
+	if err != nil {
+		return err
+	}
 
-    return nil 
+	return nil
 }
